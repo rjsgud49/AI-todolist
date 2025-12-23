@@ -24,10 +24,10 @@ import {
 } from "@/components/ui/form"
 
 const loginFormSchema = z.object({
-  email: z.string().email("바른 이메일 주소를 입력해주세요."),
+  email: z.string().email("올바른 이메일 주소를 입력해주세요."),
   password: z.string().min(1, "비밀번호를 입력해주세요."),
 })
-
+ 
 type LoginFormValues = z.infer<typeof loginFormSchema>
 
 function LoginPageContent() {
