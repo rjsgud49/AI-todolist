@@ -41,6 +41,7 @@ function ResetPasswordPageContent() {
   const [isLoading, setIsLoading] = React.useState(false)
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
   const [isSuccess, setIsSuccess] = React.useState(false)
+  const [isInitializing, setIsInitializing] = React.useState(true)
   const supabase = React.useMemo(() => createClient(), [])
 
   const form = useForm<ResetPasswordFormValues>({
@@ -50,6 +51,82 @@ function ResetPasswordPageContent() {
       confirmPassword: "",
     },
   })
+
+  // URL hash fragment 및 query parameter에서 토큰 처리 및 세션 복원
+  React.useEffect(() => {
+    const initializeSession = async () => {
+      try {
+        // URL hash fragment에서 토큰 확인
+        const hashParams = new URLSearchParams(window.location.hash.substring(1))
+        const accessToken = hashParams.get("access_token")
+        const refreshToken = hashParams.get("refresh_token")
+        const type = hashParams.get("type")
+
+        // Query parameter에서도 확인 (일부 경우)
+        const queryParams = new URLSearchParams(window.location.search)
+        const queryAccessToken = queryParams.get("access_token")
+        const queryType = queryParams.get("type")
+
+        // 비밀번호 재설정 토큰인 경우
+        const token = accessToken || queryAccessToken
+        const tokenType = type || queryType
+
+        if (token && tokenType === "recovery") {
+          // 세션 복원
+          const { data: { session }, error: sessionError } = await supabase.auth.setSession({
+            access_token: token,
+            refresh_token: refreshToken || hashParams.get("refresh_token") || "",
+          })
+
+          if (sessionError) {
+            console.error("Session restoration error:", sessionError)
+            
+            // 세션 복원 실패 시 더 자세한 오류 메시지
+            let errorMsg = "비밀번호 재설정 링크를 처리하는 중 오류가 발생했습니다."
+            if (sessionError.message?.includes("expired") || sessionError.message?.includes("invalid")) {
+              errorMsg = "비밀번호 재설정 링크가 만료되었거나 유효하지 않습니다. 새로운 링크를 요청해주세요."
+            }
+            
+            setErrorMessage(errorMsg)
+            toast.error(errorMsg)
+            setIsInitializing(false)
+            return
+          }
+
+          // 세션 복원 성공 확인
+          if (!session) {
+            setErrorMessage("세션을 복원할 수 없습니다. 새로운 비밀번호 재설정 링크를 요청해주세요.")
+            toast.error("세션을 복원할 수 없습니다. 새로운 비밀번호 재설정 링크를 요청해주세요.")
+            setIsInitializing(false)
+            return
+          }
+
+          // URL에서 hash fragment 및 query parameter 제거
+          window.history.replaceState({}, "", window.location.pathname)
+        } else {
+          // 토큰이 없는 경우 기존 세션 확인
+          const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+          
+          if (sessionError || !session) {
+            // 세션이 없으면 오류 메시지 표시
+            setErrorMessage("비밀번호 재설정 링크가 유효하지 않거나 만료되었습니다. 새로운 링크를 요청해주세요.")
+            toast.error("비밀번호 재설정 링크가 유효하지 않거나 만료되었습니다. 새로운 링크를 요청해주세요.")
+            setIsInitializing(false)
+            return
+          }
+        }
+
+        setIsInitializing(false)
+      } catch (error) {
+        console.error("Initialization error:", error)
+        setErrorMessage("비밀번호 재설정 링크를 처리하는 중 오류가 발생했습니다.")
+        toast.error("비밀번호 재설정 링크를 처리하는 중 오류가 발생했습니다.")
+        setIsInitializing(false)
+      }
+    }
+
+    initializeSession()
+  }, [supabase])
 
   // URL 파라미터에서 오류 확인
   React.useEffect(() => {
@@ -70,12 +147,22 @@ function ResetPasswordPageContent() {
 
       setErrorMessage(friendlyMessage)
       toast.error(friendlyMessage)
+      setIsInitializing(false)
     }
   }, [searchParams])
 
   const onSubmit = async (data: ResetPasswordFormValues) => {
     if (!supabase) {
       toast.error("Supabase 클라이언트를 초기화할 수 없습니다.")
+      return
+    }
+
+    // 세션 확인
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+    
+    if (sessionError || !session) {
+      setErrorMessage("세션이 만료되었습니다. 비밀번호 재설정 링크를 다시 요청해주세요.")
+      toast.error("세션이 만료되었습니다. 비밀번호 재설정 링크를 다시 요청해주세요.")
       return
     }
 
@@ -94,6 +181,9 @@ function ResetPasswordPageContent() {
 
       setIsSuccess(true)
       toast.success("비밀번호가 성공적으로 변경되었습니다.")
+
+      // 세션 종료 (보안을 위해)
+      await supabase.auth.signOut()
 
       // 2초 후 로그인 페이지로 리다이렉트
       setTimeout(() => {
@@ -138,6 +228,18 @@ function ResetPasswordPageContent() {
             </div>
           </CardContent>
         </Card>
+      </div>
+    )
+  }
+
+  // 초기화 중일 때 로딩 표시
+  if (isInitializing) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
+        <div className="text-center">
+          <Loader2Icon className="size-8 animate-spin text-primary mx-auto mb-4" />
+          <p className="text-muted-foreground">비밀번호 재설정 링크를 확인하는 중...</p>
+        </div>
       </div>
     )
   }

@@ -121,6 +121,7 @@ export default function SignupPage() {
     setShowEmailConfirmation(false)
     
     try {
+      // 먼저 회원가입 시도
       const { data: authData, error } = await supabase.auth.signUp({
         email: data.email,
         password: data.password,
@@ -129,6 +130,135 @@ export default function SignupPage() {
         },
       })
 
+      // "already registered" 오류인 경우
+      if (error && (
+        error.message?.includes("already registered") ||
+        error.message?.includes("already exists") ||
+        error.message?.includes("User already registered")
+      )) {
+        // API를 통해 탈퇴된 계정 삭제 및 회원가입 시도
+        try {
+          const response = await fetch('/api/auth/signup', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ email: data.email, password: data.password }),
+          })
+
+          const result = await response.json()
+
+          if (response.ok && result.success && result.deleted) {
+            // 서버에서 회원가입이 완료된 경우
+            if (result.user) {
+              setUserEmail(data.email)
+              const needsEmailConfirmation = result.needsEmailConfirmation !== false
+              
+              if (needsEmailConfirmation) {
+                setShowEmailConfirmation(true)
+                toast.success("회원가입이 완료되었습니다! 이메일 확인 메일을 확인해주세요.")
+              } else {
+                toast.success("회원가입에 성공했습니다!")
+                router.push("/login")
+              }
+              return
+            }
+
+            // 서버에서 계정만 삭제된 경우, 클라이언트에서 다시 회원가입 시도
+            const { data: newAuthData, error: newError } = await supabase.auth.signUp({
+              email: data.email,
+              password: data.password,
+              options: {
+                emailRedirectTo: `${window.location.origin}/login`,
+              },
+            })
+
+            if (newError) {
+              // 회원가입 실패 시 이메일 재전송 시도
+              const { error: resendError } = await supabase.auth.resend({
+                type: 'signup',
+                email: data.email,
+                options: {
+                  emailRedirectTo: `${window.location.origin}/login`,
+                },
+              })
+
+              if (!resendError) {
+                setUserEmail(data.email)
+                setShowEmailConfirmation(true)
+                toast.success("이메일 확인 메일을 다시 보냈습니다. 메일함을 확인해주세요.")
+                return
+              }
+
+              const errorMessage = getErrorMessage(newError)
+              toast.error(errorMessage)
+              form.setError("root", { message: errorMessage })
+              return
+            }
+
+            // 재가입 성공
+            if (newAuthData.user) {
+              setUserEmail(data.email)
+              const needsEmailConfirmation = !newAuthData.user.email_confirmed_at && 
+                                           !newAuthData.user.confirmed_at
+              
+              if (needsEmailConfirmation) {
+                // 이메일 재전송 시도 (확실하게 전송되도록)
+                try {
+                  await supabase.auth.resend({
+                    type: 'signup',
+                    email: data.email,
+                    options: {
+                      emailRedirectTo: `${window.location.origin}/login`,
+                    },
+                  })
+                } catch (resendErr) {
+                  console.error("이메일 재전송 오류:", resendErr)
+                }
+                
+                setShowEmailConfirmation(true)
+                toast.success("회원가입이 완료되었습니다! 이메일 확인 메일을 확인해주세요.")
+              } else {
+                toast.success("회원가입에 성공했습니다!")
+                router.push("/login")
+              }
+            }
+            return
+          } else if (response.ok && !result.deleted) {
+            // 이미 활성 계정
+            const errorMessage = result.error || "이미 가입된 이메일입니다. 로그인해주세요."
+            toast.error(errorMessage)
+            form.setError("root", { message: errorMessage })
+            return
+          }
+        } catch (apiError) {
+          console.error("API 호출 오류:", apiError)
+        }
+
+        // API 호출 실패 또는 계정 삭제 실패 시 이메일 재전송 시도
+        const { error: resendError } = await supabase.auth.resend({
+          type: 'signup',
+          email: data.email,
+          options: {
+            emailRedirectTo: `${window.location.origin}/login`,
+          },
+        })
+
+        if (!resendError) {
+          setUserEmail(data.email)
+          setShowEmailConfirmation(true)
+          toast.success("이미 가입된 이메일입니다. 확인 메일을 다시 보냈습니다. 메일함을 확인해주세요.")
+          return
+        }
+
+        // 모든 방법 실패
+        const errorMessage = "이미 가입된 이메일입니다. 로그인하거나 비밀번호 재설정을 시도해주세요. 메일이 오지 않으면 스팸함을 확인하거나 잠시 후 다시 시도해주세요."
+        toast.error(errorMessage)
+        form.setError("root", { message: errorMessage })
+        return
+      }
+
+      // 다른 오류인 경우
       if (error) {
         const errorMessage = getErrorMessage(error)
         toast.error(errorMessage)
@@ -140,16 +270,50 @@ export default function SignupPage() {
       if (authData.user) {
         setUserEmail(data.email)
         
-        // 이메일 확인이 필요한 경우 (Supabase 설정에 따라)
-        if (authData.user.identities && authData.user.identities.length === 0) {
-          // 이메일 확인 대기 중
+        // 이메일 확인이 필요한 경우 확인
+        const needsEmailConfirmation = !authData.user.email_confirmed_at && 
+                                     !authData.user.confirmed_at
+        
+        if (needsEmailConfirmation) {
+          // 이메일 확인 대기 중 - 이메일 재전송 시도 (확실하게 전송되도록)
+          try {
+            await supabase.auth.resend({
+              type: 'signup',
+              email: data.email,
+              options: {
+                emailRedirectTo: `${window.location.origin}/login`,
+              },
+            })
+          } catch (resendErr) {
+            console.error("이메일 재전송 오류:", resendErr)
+          }
+          
           setShowEmailConfirmation(true)
-          toast.success("회원가입이 완료되었습니다!")
+          toast.success("회원가입이 완료되었습니다! 이메일 확인 메일을 확인해주세요.")
         } else {
-          // 즉시 로그인 가능한 경우
+          // 즉시 로그인 가능한 경우 (이메일 확인이 비활성화된 경우)
           toast.success("회원가입에 성공했습니다!")
           router.push("/login")
         }
+      } else {
+        // 사용자 데이터가 없는 경우에도 이메일 확인 안내 및 재전송 시도
+        setUserEmail(data.email)
+        
+        // 이메일 재전송 시도
+        try {
+          await supabase.auth.resend({
+            type: 'signup',
+            email: data.email,
+            options: {
+              emailRedirectTo: `${window.location.origin}/login`,
+            },
+          })
+        } catch (resendErr) {
+          console.error("이메일 재전송 오류:", resendErr)
+        }
+        
+        setShowEmailConfirmation(true)
+        toast.success("회원가입이 완료되었습니다! 이메일 확인 메일을 확인해주세요.")
       }
     } catch (error: any) {
       const errorMessage = getErrorMessage(error)
@@ -193,14 +357,57 @@ export default function SignupPage() {
                 {showEmailConfirmation && (
                   <Alert className="bg-primary/10 border-primary/20">
                     <MailIcon className="size-4 text-primary" />
-                    <AlertDescription className="text-sm">
-                      <strong className="font-semibold">이메일 확인이 필요합니다.</strong>
-                      <br />
-                      <span className="text-muted-foreground">
-                        {userEmail}로 확인 메일을 보냈습니다.
+                    <AlertDescription className="text-sm space-y-2">
+                      <div>
+                        <strong className="font-semibold">이메일 확인이 필요합니다.</strong>
                         <br />
-                        메일함을 확인하고 링크를 클릭하여 계정을 활성화해주세요.
-                      </span>
+                        <span className="text-muted-foreground">
+                          {userEmail}로 확인 메일을 보냈습니다.
+                          <br />
+                          메일함을 확인하고 링크를 클릭하여 계정을 활성화해주세요.
+                          <br />
+                          <span className="text-xs mt-1 block">
+                            메일이 오지 않으면 스팸함을 확인하거나 아래 버튼으로 다시 보내주세요.
+                          </span>
+                        </span>
+                      </div>
+                      <div className="pt-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="w-full"
+                          onClick={async () => {
+                            if (!supabase || !userEmail) return
+                            
+                            setIsLoading(true)
+                            try {
+                              const { error } = await supabase.auth.resend({
+                                type: 'signup',
+                                email: userEmail,
+                                options: {
+                                  emailRedirectTo: `${window.location.origin}/login`,
+                                },
+                              })
+                              
+                              if (error) {
+                                toast.error(error.message || "이메일 재전송에 실패했습니다.")
+                              } else {
+                                toast.success("이메일을 다시 보냈습니다. 메일함을 확인해주세요.")
+                              }
+                            } catch (error) {
+                              toast.error("이메일 재전송에 실패했습니다.")
+                              console.error("Resend email error:", error)
+                            } finally {
+                              setIsLoading(false)
+                            }
+                          }}
+                          disabled={isLoading}
+                        >
+                          <MailIcon className="mr-2 size-4" />
+                          이메일 다시 보내기
+                        </Button>
+                      </div>
                     </AlertDescription>
                   </Alert>
                 )}

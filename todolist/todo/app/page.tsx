@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { CheckSquareIcon, LogOutIcon, SearchIcon, FilterIcon, ArrowUpDownIcon, PlusIcon, Loader2Icon, SparklesIcon, LightbulbIcon, TrendingUpIcon, UserIcon, TrashIcon, ShieldAlertIcon } from "lucide-react"
+import { CheckSquareIcon, LogOutIcon, SearchIcon, FilterIcon, ArrowUpDownIcon, PlusIcon, Loader2Icon, SparklesIcon, LightbulbIcon, TrendingUpIcon, UserIcon, TrashIcon, ShieldAlertIcon, BarChart3Icon } from "lucide-react"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -15,6 +16,15 @@ import { TodoForm, TodoList, type Todo, type TodoFormData, type Priority } from 
 import { useAuth } from "@/hooks/use-auth"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination"
 
 type SortOption = "created_date" | "due_date" | "priority" | "title"
 type FilterStatus = "all" | "completed" | "in_progress" | "overdue"
@@ -43,6 +53,8 @@ export default function HomePage() {
   const [deleteEmail, setDeleteEmail] = React.useState("")
   const [deletePassword, setDeletePassword] = React.useState("")
   const [isDeleting, setIsDeleting] = React.useState(false)
+  const [currentPage, setCurrentPage] = React.useState(1)
+  const itemsPerPage = 4
 
   // 할 일 목록 조회
   const fetchTodos = React.useCallback(async () => {
@@ -136,6 +148,26 @@ export default function HomePage() {
 
     return filtered
   }, [todos, searchQuery, priorityFilter, statusFilter, sortBy])
+
+  // 페이지네이션된 할 일 목록
+  const paginatedTodos = React.useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage
+    const endIndex = startIndex + itemsPerPage
+    return filteredAndSortedTodos.slice(startIndex, endIndex)
+  }, [filteredAndSortedTodos, currentPage, itemsPerPage])
+
+  // 총 페이지 수
+  const totalPages = Math.ceil(filteredAndSortedTodos.length / itemsPerPage)
+
+  // 필터/검색 변경 시 첫 페이지로 리셋
+  React.useEffect(() => {
+    setCurrentPage(1)
+  }, [searchQuery, priorityFilter, statusFilter, sortBy])
+
+  // 페이지 변경 시 스크롤 상단으로 이동
+  React.useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" })
+  }, [currentPage])
 
   const handleCreateTodo = async (data: TodoFormData) => {
     if (!supabase || !user) {
@@ -406,6 +438,16 @@ export default function HomePage() {
           </div>
 
           <div className="flex items-center gap-4">
+            <Link href="/stats">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-2"
+              >
+                <BarChart3Icon className="size-4" />
+                <span className="hidden sm:inline">통계</span>
+              </Button>
+            </Link>
             <Dialog open={showProfileDialog} onOpenChange={setShowProfileDialog}>
               <DialogTrigger asChild>
                 <Button
@@ -917,21 +959,101 @@ export default function HomePage() {
                 </div>
               </div>
             ) : (
-              <TodoList
-                todos={filteredAndSortedTodos}
-                onToggleComplete={handleToggleComplete}
-                onEdit={handleEditTodo}
-                onDelete={handleDeleteTodo}
-                emptyMessage={
-                  searchQuery || priorityFilter !== "all" || statusFilter !== "all"
-                    ? "검색 결과가 없습니다."
-                    : "할 일이 없습니다. 새 할 일을 추가해보세요."
-                }
-                onAddTodo={() => {
-                  setEditingTodo(null)
-                  setShowForm(true)
-                }}
-              />
+              <>
+                <TodoList
+                  todos={paginatedTodos}
+                  onToggleComplete={handleToggleComplete}
+                  onEdit={handleEditTodo}
+                  onDelete={handleDeleteTodo}
+                  emptyMessage={
+                    searchQuery || priorityFilter !== "all" || statusFilter !== "all"
+                      ? "검색 결과가 없습니다."
+                      : "할 일이 없습니다. 새 할 일을 추가해보세요."
+                  }
+                  onAddTodo={() => {
+                    setEditingTodo(null)
+                    setShowForm(true)
+                  }}
+                />
+                
+                {/* 페이지네이션 */}
+                {filteredAndSortedTodos.length > itemsPerPage && (
+                  <div className="mt-6 flex items-center justify-between">
+                    <div className="text-sm text-muted-foreground">
+                      총 {filteredAndSortedTodos.length}개 중 {((currentPage - 1) * itemsPerPage) + 1}-
+                      {Math.min(currentPage * itemsPerPage, filteredAndSortedTodos.length)}개 표시
+                    </div>
+                    <Pagination>
+                      <PaginationContent>
+                        <PaginationItem>
+                          <PaginationPrevious
+                            href="#"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              if (currentPage > 1) {
+                                setCurrentPage(currentPage - 1)
+                              }
+                            }}
+                            className={cn(
+                              currentPage === 1 && "pointer-events-none opacity-50"
+                            )}
+                          />
+                        </PaginationItem>
+                        
+                        {/* 페이지 번호 */}
+                        {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                          // 처음 2페이지, 마지막 2페이지, 현재 페이지 주변만 표시
+                          if (
+                            page === 1 ||
+                            page === totalPages ||
+                            (page >= currentPage - 1 && page <= currentPage + 1)
+                          ) {
+                            return (
+                              <PaginationItem key={page}>
+                                <PaginationLink
+                                  href="#"
+                                  onClick={(e) => {
+                                    e.preventDefault()
+                                    setCurrentPage(page)
+                                  }}
+                                  isActive={currentPage === page}
+                                >
+                                  {page}
+                                </PaginationLink>
+                              </PaginationItem>
+                            )
+                          } else if (
+                            page === currentPage - 2 ||
+                            page === currentPage + 2
+                          ) {
+                            return (
+                              <PaginationItem key={page}>
+                                <PaginationEllipsis />
+                              </PaginationItem>
+                            )
+                          }
+                          return null
+                        })}
+                        
+                        <PaginationItem>
+                          <PaginationNext
+                            href="#"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              if (currentPage < totalPages) {
+                                setCurrentPage(currentPage + 1)
+                              }
+                            }}
+                            className={cn(
+                              currentPage === totalPages && "pointer-events-none opacity-50"
+                            )}
+                          />
+                        </PaginationItem>
+                      </PaginationContent>
+                    </Pagination>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
