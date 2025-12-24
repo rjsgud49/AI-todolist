@@ -163,6 +163,7 @@ export default function StatsPage() {
         name, 
         value,
         color: colors[index % colors.length]
+
       }))
       .sort((a, b) => b.value - a.value)
   }, [stats.categoryStats])

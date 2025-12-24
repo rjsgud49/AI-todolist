@@ -58,7 +58,7 @@ export function TodoList({
   }
 
   return (
-    <div className={cn("space-y-4", className)}>
+    <div className={cn("grid grid-cols-1 md:grid-cols-2 gap-3", className)}>
       {todos.map((todo) => (
         <TodoCard
           key={todo.id}

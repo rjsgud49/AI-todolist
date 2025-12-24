@@ -54,7 +54,7 @@ export default function HomePage() {
   const [deletePassword, setDeletePassword] = React.useState("")
   const [isDeleting, setIsDeleting] = React.useState(false)
   const [currentPage, setCurrentPage] = React.useState(1)
-  const itemsPerPage = 4
+  const itemsPerPage = 8
 
   // 할 일 목록 조회
   const fetchTodos = React.useCallback(async () => {
